@@ -1,0 +1,1062 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <link rel="preload" as="image" href="assets/default-doll.png" />
+    <title>紙娃娃</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #f4f1f4;
+        --surface: #ffffff;
+        --surface-2: #ece7ec;
+        --ink: #2b2229;
+        --ink-soft: #6f6270;
+        --line: #ddd3dc;
+        --accent: #cf4f78;
+        --accent-ink: #ffffff;
+        --accent-soft: #fbe7ee;
+        --checker-a: #d8d5da;
+        --checker-b: #efedef;
+        --shadow: 0 10px 30px rgba(64, 32, 52, 0.12);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #171419;
+          --surface: #221e26;
+          --surface-2: #2d2833;
+          --ink: #f2eaf0;
+          --ink-soft: #b3a4b2;
+          --line: #3d3542;
+          --accent: #e77ba0;
+          --accent-ink: #241019;
+          --accent-soft: #3a2431;
+          --checker-a: #4a4650;
+          --checker-b: #5b5763;
+          --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .layout {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 20px 16px 40px;
+        display: grid;
+        grid-template-columns: minmax(300px, 430px) 1fr;
+        gap: 22px;
+        align-items: start;
+      }
+      /* ---------- 舞台 ---------- */
+      .stage-col { position: sticky; top: 16px; }
+      .stage-frame {
+        position: relative;
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+        border: 1px solid var(--line);
+        aspect-ratio: 875 / 1242;
+      }
+      /* 人物圖層堆疊：每一層是一張真正的 <img>，瀏覽器照一般圖片載入、
+         哪張先到先顯示，不必等全部到齊；canvas 只在染色合成完成時蓋上來 */
+      .layer-stack { position: absolute; inset: 0; z-index: 1; }
+      .layer-stack img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        /* 還沒載入成功的圖層先完全透明：手機瀏覽器對載入失敗的 <img>
+           會顯示破圖標誌，透明化可以避免左上角出現破圖圖示 */
+        opacity: 0;
+      }
+      .layer-stack img.ready { opacity: 1; }
+      /* 預設造型合成圖：單一檔案、單一請求，壓在圖層堆疊最下面當第一屏保證 */
+      .hero-default {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .stage-error {
+        position: absolute;
+        left: 12px; right: 12px; bottom: 12px;
+        z-index: 4;
+        display: none;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        text-align: center;
+        box-shadow: var(--shadow);
+      }
+      .stage-error.show { display: block; }
+      .stage-error p { margin: 0 0 8px; font-size: 13px; line-height: 1.6; color: var(--ink-soft); }
+      .stage-error button {
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: var(--accent-ink);
+        font: inherit; font-size: 14px; font-weight: 700;
+        padding: 8px 18px; border-radius: 999px; cursor: pointer;
+      }
+      .stage-frame.bg-checker {
+        background:
+          conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%, var(--checker-a) 0 75%, var(--checker-b) 0)
+          0 0 / 28px 28px;
+      }
+      .stage-frame.bg-dark { background: #333138; }
+      .stage-frame.bg-light { background: #f4f4f6; }
+      canvas#doll {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: block;
+        width: 100%;
+        height: 100%;
+        visibility: hidden;
+      }
+      canvas#doll.on { visibility: visible; }
+      .stage-loading {
+        position: absolute;
+        inset: 0;
+        z-index: 3;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        color: var(--ink-soft);
+        letter-spacing: 0.2em;
+        pointer-events: none;
+      }
+      .stage-loading.done { display: none; }
+      .stage-tools {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .stage-tools .label { font-size: 13px; color: var(--ink-soft); font-weight: 500; }
+      .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+      .seg button {
+        border: 0; background: transparent; color: var(--ink-soft);
+        font: inherit; font-size: 13px; font-weight: 700;
+        padding: 5px 12px; border-radius: 999px; cursor: pointer;
+      }
+      .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+      .stage-note { margin-top: 10px; font-size: 12.5px; line-height: 1.6; color: var(--ink-soft); }
+      /* ---------- 控制面板 ---------- */
+      .panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 16px;
+      }
+      .card h2 {
+        margin: 0 0 4px;
+        font-size: 16px;
+        font-weight: 900;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .card h2 .now { font-size: 12.5px; font-weight: 700; color: var(--accent); }
+      .card .hint { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.6; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      .btn {
+        flex: 1 1 120px;
+        border: 1px solid var(--line);
+        background: var(--surface-2);
+        color: var(--ink);
+        font: inherit; font-size: 15px; font-weight: 700;
+        padding: 12px 10px;
+        border-radius: 12px;
+        cursor: pointer;
+      }
+      .btn:hover { border-color: var(--accent); }
+      .btn:active { transform: translateY(1px); }
+      .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+      /* 色票 */
+      .swatches { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+      .swatch {
+        width: 38px; height: 38px;
+        border-radius: 50%;
+        border: 2px solid var(--line);
+        cursor: pointer;
+        padding: 0;
+        position: relative;
+        flex: none;
+      }
+      .swatch[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 5px var(--accent); }
+      .swatch.origin {
+        background:
+          linear-gradient(to top right, transparent calc(50% - 1.5px), #d24b4b calc(50% - 1.5px), #d24b4b calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+          conic-gradient(#cfcfcf 0 25%, #f2f2f2 0 50%, #cfcfcf 0 75%, #f2f2f2 0) 0 0 / 12px 12px;
+      }
+      .custom-wrap { position: relative; width: 38px; height: 38px; flex: none; display: inline-block; }
+      .custom-wrap .plus {
+        position: absolute; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 18px; font-weight: 700; line-height: 1;
+        color: #fff; text-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+        pointer-events: none;
+      }
+      input.swatch-color {
+        width: 38px; height: 38px;
+        border-radius: 50%;
+        border: 2px solid var(--line);
+        padding: 0; margin: 0;
+        background: var(--surface-2);
+        cursor: pointer;
+        appearance: none; -webkit-appearance: none;
+        display: block;
+      }
+      input.swatch-color::-webkit-color-swatch-wrapper { padding: 3px; }
+      input.swatch-color::-webkit-color-swatch { border: none; border-radius: 50%; }
+      input.swatch-color::-moz-color-swatch { border: none; border-radius: 50%; }
+      input.swatch-color.custom-active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 5px var(--accent); }
+      .swatch-name { font-size: 12px; color: var(--ink-soft); margin-top: 10px; min-height: 16px; }
+      /* 縮圖格 */
+      .thumbs {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+        gap: 10px;
+      }
+      .thumb {
+        border: 2px solid var(--line);
+        background: var(--surface);
+        border-radius: 12px;
+        padding: 6px 6px 5px;
+        cursor: pointer;
+        font: inherit;
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
+        min-width: 0;
+      }
+      .thumb .imgbox {
+        width: 100%;
+        aspect-ratio: 1;
+        border-radius: 8px;
+        overflow: hidden;
+        background:
+          conic-gradient(#c9c6cc 0 25%, #e9e7ec 0 50%, #c9c6cc 0 75%, #e9e7ec 0) 0 0 / 14px 14px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+      .thumb .tname {
+        font-size: 12px; font-weight: 700; color: var(--ink-soft);
+        max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .thumb[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+      .thumb[aria-pressed="true"] .tname { color: var(--accent); }
+      @media (max-width: 820px) {
+        .layout { grid-template-columns: 1fr; padding: 12px 12px 32px; }
+        .stage-col { position: static; }
+        .stage-frame { max-width: 430px; margin: 0 auto; }
+        .stage-tools, .stage-note { max-width: 430px; margin-left: auto; margin-right: auto; }
+        .stage-tools { margin-top: 12px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="layout">
+      <!-- 左：角色舞台 -->
+      <div class="stage-col">
+        <div class="stage-frame bg-checker" id="stageFrame">
+          <!-- 預設造型先以一張合成好的完整人物圖出現（單一檔案、單一請求），
+               壓在所有圖層最下面當第一屏保證；圖層堆疊載好後會蓋在它上面 -->
+          <img class="hero-default" id="heroDefault" src="assets/default-doll.png" data-rel="default-doll.png" alt="紙娃娃預設造型" fetchpriority="high" decoding="async" />
+          <!-- 預設套裝（Meidosan + Tomato 鞋）直接寫在 HTML 裡：
+               就算 script 沒跑起來，人物也會以一般圖片的方式出現 -->
+          <div class="layer-stack" id="layerStack" aria-hidden="true">
+            <img data-slot="coat0" alt="" style="display:none" />
+            <img data-slot="hair0" src="assets/Hair/Hair_Meidosan/Hair_Meidosan_Idle_0.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="body" src="assets/Body/Body_Idle/Body_Idle_1.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="shoe" src="assets/Shoe/Shoe_Tomato/Shoe_Tomato_Idle_1.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="bottoms" src="assets/Bottoms/Bottoms_Meidosan/Bottoms_Meidosan_Idle_1.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="coat1" src="assets/Coat/Coat_Meidosan/Coat_Meidosan_Idle_1.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="arm" src="assets/Arm/Arm_Meidosan/Arm_Meidosan_Idle_1.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="hair1" src="assets/Hair/Hair_Meidosan/Hair_Meidosan_Idle_1.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="hair2" src="assets/Hair/Hair_Meidosan/Hair_Meidosan_Idle_2.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="hat" src="assets/Hat/Hat_Meidosan/Hat_Meidosan_Idle_1.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="face0" src="assets/Face/Face_Meidosan/Face_Meidosan_Idle_0.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="face1" src="assets/Face/Face_Meidosan/Face_Meidosan_Idle_1.png" alt="" fetchpriority="high" decoding="async" />
+            <img data-slot="face2" alt="" style="display:none" />
+          </div>
+          <canvas id="doll" width="875" height="1242" aria-label="紙娃娃角色合成圖"></canvas>
+          <div class="stage-loading" id="stageLoading">載入中…</div>
+          <div class="stage-error" id="stageError">
+            <p>人物圖片載入失敗，可能是開啟方式讓圖片路徑對不到，或網路暫時不穩。</p>
+            <button type="button" id="btnRetryLoad">重新載入圖片</button>
+          </div>
+        </div>
+        <div class="stage-tools">
+          <span class="label">舞台背景</span>
+          <div class="seg" role="group" aria-label="舞台背景">
+            <button type="button" data-bg="bg-checker" aria-pressed="true">透明格</button>
+            <button type="button" data-bg="bg-dark" aria-pressed="false">深色</button>
+            <button type="button" data-bg="bg-light" aria-pressed="false">淺色</button>
+          </div>
+        </div>
+        <p class="stage-note">下載的 PNG 是 875 × 1242 透明底，不含舞台背景，方便再拿去合成或印出來。</p>
+      </div>
+
+      <!-- 右：控制面板 -->
+      <div class="panel">
+        <section class="card">
+          <div class="actions">
+            <button type="button" class="btn" id="btnRandom">隨機搭配</button>
+            <button type="button" class="btn" id="btnReset">重設</button>
+            <button type="button" class="btn primary" id="btnDownload">下載 PNG</button>
+          </div>
+          <p class="hint" style="margin: 10px 0 0;">隨機搭配一定會配齊頭髮、表情、外套和下裝，不會缺件；頭髮和眼睛的顏色也會一起隨機。</p>
+        </section>
+
+        <section class="card" id="hairColorCard">
+          <h2>頭髮顏色 <span class="now" id="hairColorNow">原色</span></h2>
+          <p class="hint">只有 _0（後髮）和 _2（瀏海）會變色，_1 的陰影部分維持原樣。</p>
+          <div class="swatches" id="hairSwatches"></div>
+        </section>
+
+        <section class="card" id="eyeColorCard">
+          <h2>眼睛顏色 <span class="now" id="eyeColorNow">原色</span></h2>
+          <p class="hint">只有表情的 _1 圖層（眼白）會變色，_0 和 _2 維持原樣。</p>
+          <div class="swatches" id="eyeSwatches"></div>
+        </section>
+
+        <div id="partSections"></div>
+      </div>
+    </main>
+    <script>
+      "use strict";
+      /* 素材清單：分類 → 套裝 → Icon 縮圖 + 要疊的 Idle 檔案（只取數字編號，數字愈大疊愈上面）。
+         Idle_Q 是另一種狀態，不在這次的疊圖規則裡，所以不列入。 */
+      const DATA = {
+        "Hair": {
+          "Child":    { "icon": "Hair_Child_Icon.png",    "files": ["Hair_Child_Idle_0.png", "Hair_Child_Idle_1.png", "Hair_Child_Idle_2.png"] },
+          "Ghost":    { "icon": "Hair_Ghost_Icon.png",    "files": ["Hair_Ghost_Idle_0.png", "Hair_Ghost_Idle_1.png", "Hair_Ghost_Idle_2.png"] },
+          "Library":  { "icon": "Hair_Library_Icon.png",  "files": ["Hair_Library_Idle_0.png", "Hair_Library_Idle_1.png", "Hair_Library_Idle_2.png"] },
+          "Meidosan": { "icon": "Hair_Meidosan_Icon.png", "files": ["Hair_Meidosan_Idle_0.png", "Hair_Meidosan_Idle_1.png", "Hair_Meidosan_Idle_2.png"] },
+          "Mitamo":   { "icon": "Hair_Mitamo_Icon.png",   "files": ["Hair_Mitamo_Idle_1.png", "Hair_Mitamo_Idle_2.png"] },
+          "Nausea":   { "icon": "Hair_Nausea_Icon.png",   "files": ["Hair_Nausea_Idle_0.png", "Hair_Nausea_Idle_1.png", "Hair_Nausea_Idle_2.png"] },
+          "Park":     { "icon": "Hair_Park_Icon.png",     "files": ["Hair_Park_Idle_1.png", "Hair_Park_Idle_2.png"] },
+          "Seed":     { "icon": "Hair_Seed_Icon.png",     "files": ["Hair_Seed_Idle_0.png", "Hair_Seed_Idle_1.png", "Hair_Seed_Idle_2.png"] },
+          "Street":   { "icon": "Hair_Street_Icon.png",   "files": ["Hair_Street_Idle_0.png", "Hair_Street_Idle_1.png", "Hair_Street_Idle_2.png"] },
+          "Three":    { "icon": "Hair_Three_Icon.png",    "files": ["Hair_Three_Idle_1.png", "Hair_Three_Idle_2.png"] },
+          "Tomato":   { "icon": "Hair_Tomato_Icon.png",   "files": ["Hair_Tomato_Idle_0.png", "Hair_Tomato_Idle_1.png", "Hair_Tomato_Idle_2.png"] },
+          "Mix1_Library_Ghost":   { "icon": "Hair_Mix1_Library_Ghost_Icon.png",   "files": ["Hair_Mix1_Library_Ghost_Idle_0.png", "Hair_Mix1_Library_Ghost_Idle_1.png", "Hair_Mix1_Library_Ghost_Idle_2.png"] },
+          "Mix2_Meidosan_Three":  { "icon": "Hair_Mix2_Meidosan_Three_Icon.png",  "files": ["Hair_Mix2_Meidosan_Three_Idle_0.png", "Hair_Mix2_Meidosan_Three_Idle_1.png", "Hair_Mix2_Meidosan_Three_Idle_2.png"] },
+          "Mix3_Seed_Child":      { "icon": "Hair_Mix3_Seed_Child_Icon.png",      "files": ["Hair_Mix3_Seed_Child_Idle_0.png", "Hair_Mix3_Seed_Child_Idle_1.png", "Hair_Mix3_Seed_Child_Idle_2.png"] },
+          "Mix4_Street_Tomato":   { "icon": "Hair_Mix4_Street_Tomato_Icon.png",   "files": ["Hair_Mix4_Street_Tomato_Idle_0.png", "Hair_Mix4_Street_Tomato_Idle_1.png", "Hair_Mix4_Street_Tomato_Idle_2.png"] }
+        },
+        "Face": {
+          "Child":    { "icon": "Face_Child_Icon.png",    "files": ["Face_Child_Idle_0.png", "Face_Child_Idle_1.png", "Face_Child_Idle_2.png"] },
+          "Ghost":    { "icon": "Face_Ghost_Icon.png",    "files": ["Face_Ghost_Idle_0.png", "Face_Ghost_Idle_1.png", "Face_Ghost_Idle_2.png"] },
+          "Library":  { "icon": "Face_Library_Icon.png",  "files": ["Face_Library_Idle_0.png", "Face_Library_Idle_1.png"] },
+          "Meidosan": { "icon": "Face_Meidosan_Icon.png", "files": ["Face_Meidosan_Idle_0.png", "Face_Meidosan_Idle_1.png"] },
+          "Mitamo":   { "icon": "Face_Mitamo_Icon.png",   "files": ["Face_Mitamo_Idle_0.png", "Face_Mitamo_Idle_1.png", "Face_Mitamo_Idle_2.png"] },
+          "Nausea":   { "icon": "Face_Nausea_Icon.png",   "files": ["Face_Nausea_Idle_0.png", "Face_Nausea_Idle_1.png", "Face_Nausea_Idle_2.png"] },
+          "Park":     { "icon": "Face_Park_Icon.png",     "files": ["Face_Park_Idle_0.png"] },
+          "Seed":     { "icon": "Face_Seed_Icon.png",     "files": ["Face_Seed_Idle_0.png", "Face_Seed_Idle_1.png", "Face_Seed_Idle_2.png"] },
+          "Street":   { "icon": "Face_Street_Icon.png",   "files": ["Face_Street_Idle_0.png", "Face_Street_Idle_1.png"] },
+          "Three":    { "icon": "Face_Three_Icon.png",    "files": ["Face_Three_Idle_0.png", "Face_Three_Idle_1.png", "Face_Three_Idle_2.png"] },
+          "Tomato":   { "icon": "Face_Tomato_Icon.png",   "files": ["Face_Tomato_Idle_0.png", "Face_Tomato_Idle_1.png", "Face_Tomato_Idle_2.png"] }
+        },
+        "Hat": {
+          "Child":     { "icon": "Hat_Child_Icon.png",     "files": ["Hat_Child_Idle_1.png"] },
+          "Christmas": { "icon": "Hat_Christmas_Icon.png", "files": ["Hat_Christmas_Idle_1.png"] },
+          "Ghost":     { "icon": "Hat_Ghost_Icon.png",     "files": ["Hat_Ghost_Idle_1.png"] },
+          "Meidosan":  { "icon": "Hat_Meidosan_Icon.png",  "files": ["Hat_Meidosan_Idle_1.png"] },
+          "Mitamo":    { "icon": "Hat_Mitamo_Icon.png",    "files": ["Hat_Mitamo_Idle_1.png"] },
+          "Nausea":    { "icon": "Hat_Nausea_Icon.png",    "files": ["Hat_Nausea_Idle_1.png"] },
+          "Park":      { "icon": "Hat_Park_Icon.png",      "files": ["Hat_Park_Idle_1.png"] },
+          "Seed":      { "icon": "Hat_Seed_Icon.png",      "files": ["Hat_Seed_Idle_1.png"] },
+          "Street":    { "icon": "Hat_Street_Icon.png",    "files": ["Hat_Street_Idle_1.png"] },
+          "Three":     { "icon": "Hat_Three_Icon.png",     "files": ["Hat_Three_Idle_1.png"] },
+          "Tomato":    { "icon": "Hat_Tomato_Icon.png",    "files": ["Hat_Tomato_Idle_1.png"] }
+        },
+        "Coat": {
+          "Child":    { "icon": "Coat_Child_Icon.png",    "files": ["Coat_Child_Idle_1.png"] },
+          "Ghost":    { "icon": "Coat_Ghost_Icon.png",    "files": ["Coat_Ghost_Idle_0.png", "Coat_Ghost_Idle_1.png"] },
+          "Library":  { "icon": "Coat_Library_Icon.png",  "files": ["Coat_Library_Idle_1.png"] },
+          "Meidosan": { "icon": "Coat_Meidosan_Icon.png", "files": ["Coat_Meidosan_Idle_1.png"] },
+          "Mitamo":   { "icon": "Coat_Mitamo_Icon.png",   "files": ["Coat_Mitamo_Idle_0.png", "Coat_Mitamo_Idle_1.png"] },
+          "Nausea":   { "icon": "Coat_Nausea_Icon.png",   "files": ["Coat_Nausea_Idle_0.png", "Coat_Nausea_Idle_1.png"] },
+          "Park":     { "icon": "Coat_Park_Icon.png",     "files": ["Coat_Park_Idle_1.png"] },
+          "Seed":     { "icon": "Coat_Seed_Icon.png",     "files": ["Coat_Seed_Idle_1.png"] },
+          "Street":   { "icon": "Coat_Street_Icon.png",   "files": ["Coat_Street_Idle_0.png", "Coat_Street_Idle_1.png"] },
+          "Three":    { "icon": "Coat_Three_Icon.png",    "files": ["Coat_Three_Idle_0.png", "Coat_Three_Idle_1.png"] },
+          "Tomato":   { "icon": "Coat_Tomato_Icon.png",   "files": ["Coat_Tomato_Idle_1.png"] }
+        },
+        "Bottoms": {
+          "Child":    { "icon": "Bottoms_Child_Icon.png",    "files": ["Bottoms_Child_Idle_1.png"] },
+          "Ghost":    { "icon": "Bottoms_Ghost_Icon.png",    "files": ["Bottoms_Ghost_Idle_1.png"] },
+          "Library":  { "icon": "Bottoms_Library_Icon.png",  "files": ["Bottoms_Library_Idle_1.png"] },
+          "Meidosan": { "icon": "Bottoms_Meidosan_Icon.png", "files": ["Bottoms_Meidosan_Idle_1.png"] },
+          "Mitamo":   { "icon": "Bottoms_Mitamo_Icon.png",   "files": ["Bottoms_Mitamo_Idle_1.png"] },
+          "Nausea":   { "icon": "Bottoms_Nausea_Icon.png",   "files": ["Bottoms_Nausea_Idle_1.png"] },
+          "Park":     { "icon": "Bottoms_Park_Icon.png",     "files": ["Bottoms_Park_Idle_1.png"] },
+          "Seed":     { "icon": "Bottoms_Seed_Icon.png",     "files": ["Bottoms_Seed_Idle_1.png"] },
+          "Street":   { "icon": "Bottoms_Street_Icon.png",   "files": ["Bottoms_Street_Idle_1.png"] },
+          "Three":    { "icon": "Bottoms_Three_Icon.png",    "files": ["Bottoms_Three_Idle_1.png"] },
+          "Tomato":   { "icon": "Bottoms_Tomato_Icon.png",   "files": ["Bottoms_Tomato_Idle_1.png"] }
+        },
+        "Arm": {
+          "Child":    { "icon": "Arm_Child_Icon.png",    "files": ["Arm_Child_Idle_1.png"] },
+          "Meidosan": { "icon": "Arm_Meidosan_Icon.png", "files": ["Arm_Meidosan_Idle_1.png"] },
+          "Mitamo":   { "icon": "Arm_Mitamo_Icon.png",   "files": ["Arm_Mitamo_Idle_1.png"] },
+          "Nausea":   { "icon": "Arm_Nausea_Icon.png",   "files": ["Arm_Nausea_Idle_1.png"] },
+          "Park":     { "icon": "Arm_Park_Icon.png",     "files": ["Arm_Park_Idle_1.png"] },
+          "Three":    { "icon": "Arm_Three_Icon.png",    "files": ["Arm_Three_Idle_1.png"] },
+          "Tomato":   { "icon": "Arm_Tomato_Icon.png",   "files": ["Arm_Tomato_Idle_1.png"] }
+        },
+        "Shoe": {
+          "Child":   { "icon": "Shoe_Child_Icon.png",   "files": ["Shoe_Child_Idle_1.png"] },
+          "Ghost":   { "icon": "Shoe_Ghost_Icon.png",   "files": ["Shoe_Ghost_Idle_1.png"] },
+          "Library": { "icon": "Shoe_Library_Icon.png", "files": ["Shoe_Library_Idle_1.png"] },
+          "Mitamo":  { "icon": "Shoe_Mitamo_Icon.png",  "files": ["Shoe_Mitamo_Idle_1.png"] },
+          "Nausea":  { "icon": "Shoe_Nausea_Icon.png",  "files": ["Shoe_Nausea_Idle_1.png"] },
+          "Park":    { "icon": "Shoe_Park_Icon.png",    "files": ["Shoe_Park_Idle_1.png"] },
+          "Seed":    { "icon": "Shoe_Seed_Icon.png",    "files": ["Shoe_Seed_Idle_1.png"] },
+          "Street":  { "icon": "Shoe_Street_Icon.png",  "files": ["Shoe_Street_Idle_1.png"] },
+          "Three":   { "icon": "Shoe_Three_Icon.png",   "files": ["Shoe_Three_Idle_1.png"] },
+          "Tomato":  { "icon": "Shoe_Tomato_Icon.png",  "files": ["Shoe_Tomato_Idle_1.png"] }
+        },
+        "Body": {
+          "Idle": { "icon": "Body_Idle_Icon.png", "files": ["Body_Idle_1.png"] }
+        }
+      };
+
+      const PARTS = [
+        { cat: "Hair",    label: "頭髮" },
+        { cat: "Face",    label: "表情" },
+        { cat: "Hat",     label: "帽子" },
+        { cat: "Coat",    label: "外套" },
+        { cat: "Bottoms", label: "下裝" },
+        { cat: "Arm",     label: "手臂" },
+        { cat: "Shoe",    label: "鞋子" }
+      ];
+      /* Meidosan 沒有專屬鞋子，預設借 Tomato 的紅鞋 */
+      const DEFAULTS = { Hair: "Meidosan", Face: "Meidosan", Hat: "Meidosan", Coat: "Meidosan", Bottoms: "Meidosan", Arm: "Meidosan", Shoe: "Tomato" };
+      const PRESET_COLORS = [
+        { name: "粉紅", hex: "#ff8fab" },
+        { name: "紅",   hex: "#e23b3b" },
+        { name: "藍",   hex: "#4a90d9" },
+        { name: "綠",   hex: "#43aa6b" },
+        { name: "黃",   hex: "#f2c230" },
+        { name: "紫",   hex: "#9b6dd6" },
+        { name: "黑",   hex: "#2b2b2b" },
+        { name: "白",   hex: "#ffffff" },
+        { name: "棕",   hex: "#8b5a2b" }
+      ];
+
+      const state = {
+        outfit: Object.assign({}, DEFAULTS),
+        hairColor: null,  /* null = 原色，不上色 */
+        eyeColor: null
+      };
+
+      const W = 875, H = 1242;
+      const canvas = document.getElementById("doll");
+      const ctx = canvas.getContext("2d");
+      const loadingEl = document.getElementById("stageLoading");
+
+      /* ---------- 資產路徑自動探測 ----------
+         先前版本在桌機與稽核環境都正常、真手機上卻整片空白（只剩破圖標誌），
+         代表手機開啟頁面的網址形式讓相對路徑 assets/… 解析到錯誤位置。
+         所以資產路徑改成「候補清單」：相對路徑、./ 相對、依目前頁面路徑推導、
+         以及發布路徑 /spaces/v2/zhi-wa-wa/ 的絕對路徑依序嘗試，
+         哪一條真的載得到圖就全部改用那一條。 */
+      const ASSET_CANDIDATES = (() => {
+        const list = [];
+        const add = b => { if (b && list.indexOf(b) === -1) list.push(b); };
+        add("assets/");
+        add("./assets/");
+        add("/spaces/v2/zhi-wa-wa/assets/");
+        try {
+          const p = location.pathname || "/";
+          if (p.endsWith("/")) add(p + "assets/");
+          else if (/\.[a-z0-9]+$/i.test(p)) add(p.slice(0, p.lastIndexOf("/") + 1) + "assets/");
+          else add(p + "/assets/");
+        } catch (e) { /* 讀不到 location 就只用前面的候補 */ }
+        return list;
+      })();
+      let assetBase = ASSET_CANDIDATES[0];
+      function assetRel(cat, outfit, file) {
+        return cat + "/" + cat + "_" + outfit + "/" + file;
+      }
+      function assetPath(cat, outfit, file) {
+        return assetBase + assetRel(cat, outfit, file);
+      }
+      function relFromSrc(src) {
+        const m = /(?:^|\/)assets\/(.+)$/.exec(src || "");
+        return m ? m[1] : null;
+      }
+      /* 某張圖用候補清單裡下一條路徑再試一次 */
+      function cycleImgBase(im) {
+        const rel = im.dataset.rel;
+        if (!rel) return;
+        const idx = parseInt(im.dataset.tryIdx || "0", 10) + 1;
+        if (idx < ASSET_CANDIDATES.length) {
+          im.dataset.tryIdx = String(idx);
+          im.classList.remove("ready");
+          im.src = ASSET_CANDIDATES[idx] + rel;
+        }
+      }
+      /* 找到一條真的可行的路徑就全面採用：舞台圖層、合成圖、縮圖一起換 */
+      function adoptBase(base) {
+        if (!base || base === assetBase) return;
+        assetBase = base;
+        const idx = ASSET_CANDIDATES.indexOf(base);
+        document.querySelectorAll("img[data-rel]").forEach(im => {
+          im.dataset.tryIdx = String(idx < 0 ? 0 : idx);
+          const want = base + im.dataset.rel;
+          if (im.getAttribute("src") !== want) {
+            im.classList.remove("ready");
+            im.src = want;
+          }
+        });
+        syncStack();
+        render();
+      }
+      function idleIndex(file) {
+        const m = /_Idle_(\d+)\.png$/.exec(file);
+        return m ? parseInt(m[1], 10) : 99;
+      }
+
+      /* ---------- 圖片載入與上色 ---------- */
+      const imgCache = new Map();
+      function loadImageOnce(src) {
+        return new Promise((resolve, reject) => {
+          const im = new Image();
+          /* 單次載入加 30 秒逾時：手機網路上請求可能卡住、既不成功也不失敗，
+             沒有逾時的話 Promise 永遠不結束。逾時就當失敗，讓外層重試。
+             這條路徑現在只供 canvas 染色／下載合成用，舞台顯示走 <img> 堆疊，
+             不再因為這裡卡住就整個人消失。 */
+          const timer = setTimeout(() => {
+            im.onload = im.onerror = null;
+            im.src = "";
+            reject(new Error("load timeout: " + src));
+          }, 30000);
+          im.onload = () => { clearTimeout(timer); resolve(im); };
+          im.onerror = () => { clearTimeout(timer); reject(new Error("load failed: " + src)); };
+          im.src = src;
+        });
+      }
+      /* 單張圖自己帶重試：網路慢或偶發失敗時，間隔愈拉愈長再試，
+         不要一次失敗就把那個部位判死刑。全部試完還是失敗才把快取清掉，
+         讓之後的 render 可以重新來過。 */
+      function loadImage(src) {
+        if (!imgCache.has(src)) {
+          const p = (async () => {
+            const delays = [0, 400, 900, 1600, 2500];
+            let lastErr = null;
+            for (let i = 0; i < delays.length; i++) {
+              if (delays[i]) await new Promise(r => setTimeout(r, delays[i]));
+              try { return await loadImageOnce(src); }
+              catch (e) { lastErr = e; }
+            }
+            imgCache.delete(src);
+            throw lastErr;
+          })();
+          imgCache.set(src, p);
+        }
+        return imgCache.get(src);
+      }
+      /* 背景預載全部套裝的圖層，等使用者按隨機搭配時圖早就都在快取裡。
+         但預載只能在人物第一次完整畫出來之後才開始，而且同時最多 3 張：
+         以前一開頁就 6 路齊發跟人物圖層搶頻寬，手機網路一慢，
+         人物需要的圖層排在兩百多張預載後面遲遲到不齊，舞台就一直空白。 */
+      let preloadStarted = false;
+      function preloadAll() {
+        if (preloadStarted) return;
+        preloadStarted = true;
+        const srcs = new Set();
+        Object.keys(DATA).forEach(cat => {
+          Object.keys(DATA[cat]).forEach(outfit => {
+            DATA[cat][outfit].files.forEach(f => srcs.add(assetPath(cat, outfit, f)));
+          });
+        });
+        const list = Array.from(srcs);
+        let idx = 0;
+        const worker = async () => {
+          while (idx < list.length) {
+            const src = list[idx++];
+            try { await loadImage(src); } catch (e) { /* 預載失敗沒關係，render 時會再重試 */ }
+          }
+        };
+        for (let i = 0; i < 3; i++) worker();
+      }
+      const tintCache = new Map();
+      /* 先去飽和（取亮度）再 multiply 目標顏色：白色→目標色、灰色→深一點的目標色、黑色線條維持近黑 */
+      function tinted(img, hex) {
+        const key = img.src + "|" + hex;
+        if (tintCache.has(key)) return tintCache.get(key);
+        const c = document.createElement("canvas");
+        c.width = W; c.height = H;
+        const x = c.getContext("2d");
+        x.drawImage(img, 0, 0);
+        const id = x.getImageData(0, 0, W, H);
+        const d = id.data;
+        const tr = parseInt(hex.slice(1, 3), 16), tg = parseInt(hex.slice(3, 5), 16), tb = parseInt(hex.slice(5, 7), 16);
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i + 3] === 0) continue;
+          const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          d[i]     = gray * tr / 255;
+          d[i + 1] = gray * tg / 255;
+          d[i + 2] = gray * tb / 255;
+        }
+        x.putImageData(id, 0, 0);
+        tintCache.set(key, c);
+        return c;
+      }
+
+      /* ---------- 圖層順序（由下往上，照規格） ---------- */
+      function buildLayers() {
+        const layers = [];
+        const push = (cat, outfit, file, tintHex) => layers.push({ src: assetPath(cat, outfit, file), tint: tintHex || null });
+        const hairFiles = DATA.Hair[state.outfit.Hair].files;
+        const coatFiles = DATA.Coat[state.outfit.Coat].files;
+        /* 0. Coat Idle_0：外套的 _0 是背後部件（例如 Nausea 的星形框），壓在所有圖層最下面，連後髮都疊在它上面 */
+        coatFiles.filter(f => idleIndex(f) === 0).forEach(f => push("Coat", state.outfit.Coat, f, null));
+        /* 1. Hair Idle_0：後髮，在身體後面 */
+        hairFiles.filter(f => idleIndex(f) === 0).forEach(f => push("Hair", state.outfit.Hair, f, state.hairColor));
+        /* 2. Body */
+        DATA.Body.Idle.files.forEach(f => push("Body", "Idle", f, null));
+        /* 3. Shoe：緊貼身體之上 */
+        DATA.Shoe[state.outfit.Shoe].files.forEach(f => push("Shoe", state.outfit.Shoe, f, null));
+        /* 4. Bottoms */
+        DATA.Bottoms[state.outfit.Bottoms].files.forEach(f => push("Bottoms", state.outfit.Bottoms, f, null));
+        /* 5. Coat Idle_1 以上：外套本體，照原本的位置疊 */
+        coatFiles.filter(f => idleIndex(f) >= 1).forEach(f => push("Coat", state.outfit.Coat, f, null));
+        /* 6. Arm */
+        DATA.Arm[state.outfit.Arm].files.forEach(f => push("Arm", state.outfit.Arm, f, null));
+        /* 7-8. Hair Idle_1、Idle_2：前髮與瀏海，在臉前面。
+           只有 _2 吃頭髮顏色；_1 是陰影層，維持原色不變色 */
+        hairFiles.filter(f => idleIndex(f) >= 1).forEach(f =>
+          push("Hair", state.outfit.Hair, f, idleIndex(f) === 2 ? state.hairColor : null));
+        /* 9. Hat */
+        DATA.Hat[state.outfit.Hat].files.forEach(f => push("Hat", state.outfit.Hat, f, null));
+        /* 10. Face 全部疊在最上面；只有 _1 吃眼睛顏色 */
+        DATA.Face[state.outfit.Face].files.forEach(f =>
+          push("Face", state.outfit.Face, f, idleIndex(f) === 1 ? state.eyeColor : null));
+        return layers;
+      }
+
+      /* ---------- 舞台 <img> 堆疊（主要顯示路徑） ----------
+         人物主要靠真正的 <img> 一層層疊出來：瀏覽器把螢幕上的圖片當
+         高優先級資源載入，哪張先到就先顯示，不必等全部到齊；
+         就算某一張在手機網路上卡住，也只是缺那一層，不會整個人消失。
+         canvas 只負責染色合成與下載：有染色且 canvas 畫好當前搭配時，
+         才蓋到堆疊上面；沒染色時完全靠堆疊顯示。 */
+      const SLOT_ORDER = ["coat0", "hair0", "body", "shoe", "bottoms", "coat1", "arm", "hair1", "hair2", "hat", "face0", "face1", "face2"];
+      const slotImgs = {};
+      document.querySelectorAll("#layerStack img[data-slot]").forEach(im => { slotImgs[im.dataset.slot] = im; });
+      function slotFor(cat, file) {
+        const idx = idleIndex(file);
+        switch (cat) {
+          case "Coat": return idx === 0 ? "coat0" : "coat1";
+          case "Hair": return idx === 0 ? "hair0" : (idx === 1 ? "hair1" : "hair2");
+          case "Body": return "body";
+          case "Shoe": return "shoe";
+          case "Bottoms": return "bottoms";
+          case "Arm": return "arm";
+          case "Hat": return "hat";
+          case "Face": return idx === 0 ? "face0" : (idx === 1 ? "face1" : "face2");
+        }
+        return null;
+      }
+      const heroImg = document.getElementById("heroDefault");
+      const stageErrorEl = document.getElementById("stageError");
+      let stageImageLoaded = false;
+      function showStageError() { stageErrorEl.classList.add("show"); }
+      function hideStageError() { stageErrorEl.classList.remove("show"); }
+      function markStageLoaded() {
+        stageImageLoaded = true;
+        hideStageError();
+        loadingEl.classList.add("done");
+      }
+      /* 一張舞台圖真的載入成功時：標記它可見；若它用的是候補清單裡
+         其他條路徑，代表預設路徑在這台裝置上行不通，全面改用那條 */
+      function onStageImgLoad(im) {
+        im.classList.add("ready");
+        if (im.naturalWidth > 0) markStageLoaded();
+        const idx = parseInt(im.dataset.tryIdx || "0", 10);
+        if (ASSET_CANDIDATES[idx] && ASSET_CANDIDATES[idx] !== assetBase) {
+          adoptBase(ASSET_CANDIDATES[idx]);
+        }
+        updateStackLoading();
+      }
+      function onStageImgError(im) {
+        cycleImgBase(im);
+        updateStackLoading();
+      }
+      function wireStageImg(im) {
+        if (!im) return;
+        const rel = relFromSrc(im.getAttribute("src")) || im.dataset.rel;
+        if (rel) im.dataset.rel = rel;
+        if (im.dataset.tryIdx === undefined) im.dataset.tryIdx = "0";
+        im.addEventListener("load", () => onStageImgLoad(im));
+        im.addEventListener("error", () => onStageImgError(im));
+        /* script 執行前圖片可能已經載完或失敗了，補檢查一次 */
+        if (im.complete) {
+          if (im.naturalWidth > 0) onStageImgLoad(im);
+          else if (im.getAttribute("src")) cycleImgBase(im);
+        }
+      }
+      let stackSettledOnce = false;
+      wireStageImg(heroImg);
+      function updateStackLoading() {
+        if (stageImageLoaded || (heroImg.complete && heroImg.naturalWidth > 0)) {
+          markStageLoaded();
+          if (!stackSettledOnce) { stackSettledOnce = true; setTimeout(preloadAll, 600); }
+          return;
+        }
+        let pending = false;
+        SLOT_ORDER.forEach(s => {
+          const im = slotImgs[s];
+          if (im && im.style.display !== "none" && im.getAttribute("src") && !im.complete) pending = true;
+        });
+        if (!pending) {
+          loadingEl.classList.add("done");
+          if (!stackSettledOnce) { stackSettledOnce = true; setTimeout(preloadAll, 600); }
+        } else {
+          loadingEl.classList.remove("done");
+        }
+      }
+      SLOT_ORDER.forEach(s => { wireStageImg(slotImgs[s]); });
+      function syncStack() {
+        const used = new Set();
+        buildLayers().forEach(l => {
+          const m = /assets\/([^/]+)\/[^/]+\/([^/]+)$/.exec(l.src);
+          if (!m) return;
+          const slot = slotFor(m[1], m[2]);
+          if (!slot || !slotImgs[slot]) return;
+          used.add(slot);
+          const im = slotImgs[slot];
+          const rel = relFromSrc(l.src);
+          if (rel) im.dataset.rel = rel;
+          im.dataset.tryIdx = String(Math.max(0, ASSET_CANDIDATES.indexOf(assetBase)));
+          if (im.getAttribute("src") !== l.src) {
+            im.classList.remove("ready");
+            im.src = l.src;
+            if (im.complete && im.naturalWidth > 0) im.classList.add("ready");
+          }
+          im.style.display = "block";
+        });
+        SLOT_ORDER.forEach(s => {
+          if (!used.has(s) && slotImgs[s]) {
+            slotImgs[s].removeAttribute("src");
+            slotImgs[s].classList.remove("ready");
+            slotImgs[s].style.display = "none";
+          }
+        });
+        updateHeroVisibility();
+        updateStackLoading();
+        updateCanvasVisibility();
+      }
+      /* 合成圖只在「目前正是預設造型且沒染色」時墊在最下面當保證；
+         一旦換裝或染色就藏起來，畫面完全由圖層堆疊／canvas 負責 */
+      function isDefaultLook() {
+        return state.hairColor === null && state.eyeColor === null &&
+          PARTS.every(({ cat }) => state.outfit[cat] === DEFAULTS[cat]);
+      }
+      function updateHeroVisibility() {
+        heroImg.style.display = isDefaultLook() ? "block" : "none";
+      }
+      /* 背景探測：開頁後等一下，若舞台圖一張都沒載成功，
+         就逐條試候補路徑，第一條通的全面採用；全滅才顯示重試提示 */
+      function probeImage(src, timeoutMs) {
+        return new Promise(res => {
+          const t = new Image();
+          const timer = setTimeout(() => { t.onload = t.onerror = null; t.src = ""; res(false); }, timeoutMs);
+          t.onload = () => { clearTimeout(timer); res(t.naturalWidth > 0); };
+          t.onerror = () => { clearTimeout(timer); res(false); };
+          t.src = src;
+        });
+      }
+      async function probeAssetBase() {
+        await new Promise(r => setTimeout(r, 2500));
+        if (stageImageLoaded) return;
+        for (const base of ASSET_CANDIDATES) {
+          if (base === assetBase) continue;
+          const ok = await probeImage(base + "Body/Body_Idle/Body_Idle_1.png", 7000);
+          if (stageImageLoaded) return;
+          if (ok) { adoptBase(base); return; }
+        }
+        if (!stageImageLoaded) showStageError();
+      }
+      document.getElementById("btnRetryLoad").addEventListener("click", () => {
+        hideStageError();
+        stageImageLoaded = false;
+        document.querySelectorAll("#layerStack img, #heroDefault").forEach(im => {
+          if (!im.dataset.rel) return;
+          im.dataset.tryIdx = "0";
+          im.classList.remove("ready");
+          if (im.getAttribute("src")) im.src = ASSET_CANDIDATES[0] + im.dataset.rel;
+        });
+        refreshStage();
+        probeAssetBase();
+      });
+
+      /* ---------- canvas 顯示狀態 ----------
+         canvas 只有在「有染色」而且「畫的正是目前搭配」時才顯示，
+         其他時候藏起來，讓下面的 <img> 堆疊負責顯示。 */
+      let paintedKey = null;
+      function currentKey() { return JSON.stringify([state.outfit, state.hairColor, state.eyeColor]); }
+      function updateCanvasVisibility() {
+        const tintedMode = state.hairColor !== null || state.eyeColor !== null;
+        canvas.classList.toggle("on", tintedMode && paintedKey === currentKey());
+      }
+      function sanitizeOutfit() {
+        PARTS.forEach(({ cat }) => {
+          if (!DATA[cat][state.outfit[cat]]) {
+            state.outfit[cat] = DEFAULTS[cat];
+            syncPartUI(cat);
+          }
+        });
+      }
+      function refreshStage() { sanitizeOutfit(); syncStack(); render(); }
+
+      let renderSeq = 0;
+      async function render(attempt) {
+        attempt = attempt || 0;
+        const seq = ++renderSeq;
+        /* 保底檢查：任何部位的選擇遺失或對不到素材時，回到該部位的預設套裝，
+           頭髮、表情、外套、下裝永遠不會缺席 */
+        sanitizeOutfit();
+        const layers = buildLayers();
+        const results = await Promise.allSettled(layers.map(l => loadImage(l.src)));
+        if (seq !== renderSeq) return;
+        let failed = 0;
+        results.forEach(r => { if (r.status !== "fulfilled") failed++; });
+        if (failed > 0) {
+          /* canvas 合成堅持圖層到齊才畫（染色與下載需要完整合成圖）。
+             但舞台顯示已經改走 <img> 堆疊，canvas 還沒畫好只是染色／下載
+             還沒就緒，人物照常顯示，不會再因為這裡卡住就整片空白。
+             缺的圖繼續在背景重試，間隔愈拉愈長（最長 5 秒）直到到齊。 */
+          const wait = Math.min(800 * (attempt + 1), 5000);
+          setTimeout(() => { if (seq === renderSeq) render(attempt + 1); }, wait);
+          return;
+        }
+        ctx.clearRect(0, 0, W, H);
+        layers.forEach((l, i) => {
+          ctx.drawImage(l.tint ? tinted(results[i].value, l.tint) : results[i].value, 0, 0);
+        });
+        paintedKey = currentKey();
+        updateCanvasVisibility();
+        /* canvas 畫出來了，頻寬空出來才開始背景預載其餘套裝 */
+        setTimeout(preloadAll, 600);
+      }
+
+      /* ---------- 部位縮圖區 ---------- */
+      const sectionsEl = document.getElementById("partSections");
+      const thumbButtons = {}; /* cat -> Map(outfit -> button) */
+      PARTS.forEach(({ cat, label }) => {
+        const sec = document.createElement("section");
+        sec.className = "card";
+        const h = document.createElement("h2");
+        h.textContent = label + " ";
+        const now = document.createElement("span");
+        now.className = "now";
+        now.id = "now-" + cat;
+        h.appendChild(now);
+        sec.appendChild(h);
+        const grid = document.createElement("div");
+        grid.className = "thumbs";
+        thumbButtons[cat] = new Map();
+        Object.keys(DATA[cat]).forEach(outfit => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "thumb";
+          b.setAttribute("aria-pressed", "false");
+          b.title = outfit;
+          const box = document.createElement("span");
+          box.className = "imgbox";
+          const im = document.createElement("img");
+          /* 縮圖改成懶載入：76 張 Icon 不要在開頁時跟人物圖層搶頻寬，
+             捲到附近再載就好 */
+          im.loading = "lazy";
+          im.decoding = "async";
+          im.dataset.rel = assetRel(cat, outfit, DATA[cat][outfit].icon);
+          im.src = assetPath(cat, outfit, DATA[cat][outfit].icon);
+          im.addEventListener("error", () => cycleImgBase(im));
+          im.addEventListener("load", () => {
+            const idx = parseInt(im.dataset.tryIdx || "0", 10);
+            if (ASSET_CANDIDATES[idx] && ASSET_CANDIDATES[idx] !== assetBase) adoptBase(ASSET_CANDIDATES[idx]);
+          });
+          im.alt = label + " " + outfit;
+          box.appendChild(im);
+          const nm = document.createElement("span");
+          nm.className = "tname";
+          nm.textContent = outfit;
+          b.appendChild(box);
+          b.appendChild(nm);
+          b.addEventListener("click", () => {
+            state.outfit[cat] = outfit;
+            syncPartUI(cat);
+            refreshStage();
+          });
+          grid.appendChild(b);
+          thumbButtons[cat].set(outfit, b);
+        });
+        sec.appendChild(grid);
+        sectionsEl.appendChild(sec);
+      });
+      function syncPartUI(cat) {
+        thumbButtons[cat].forEach((b, outfit) =>
+          b.setAttribute("aria-pressed", outfit === state.outfit[cat] ? "true" : "false"));
+        document.getElementById("now-" + cat).textContent = state.outfit[cat];
+      }
+
+      /* ---------- 顏色選擇 ---------- */
+      function buildSwatches(containerId, nowId, getColor, setColor) {
+        const box = document.getElementById(containerId);
+        const nowEl = document.getElementById(nowId);
+        const entries = [];
+        function refresh() {
+          const cur = getColor();
+          entries.forEach(e => e.el.setAttribute("aria-pressed", e.hex === cur ? "true" : "false"));
+          if (cur === null) nowEl.textContent = "原色";
+          else {
+            const p = PRESET_COLORS.find(c => c.hex === cur);
+            nowEl.textContent = p ? p.name + " " + cur : "自訂 " + cur;
+          }
+        }
+        const origin = document.createElement("button");
+        origin.type = "button";
+        origin.className = "swatch origin";
+        origin.title = "原色";
+        origin.setAttribute("aria-label", "原色");
+        origin.addEventListener("click", () => { setColor(null); refresh(); refreshStage(); });
+        box.appendChild(origin);
+        entries.push({ el: origin, hex: null });
+        PRESET_COLORS.forEach(c => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "swatch";
+          b.style.background = c.hex;
+          b.title = c.name;
+          b.setAttribute("aria-label", c.name);
+          b.addEventListener("click", () => { setColor(c.hex); refresh(); refreshStage(); });
+          box.appendChild(b);
+          entries.push({ el: b, hex: c.hex });
+        });
+        const wrap = document.createElement("span");
+        wrap.className = "custom-wrap";
+        const input = document.createElement("input");
+        input.type = "color";
+        input.className = "swatch-color";
+        input.value = "#ff8fab";
+        input.title = "自訂顏色";
+        input.setAttribute("aria-label", "自訂顏色");
+        const plus = document.createElement("span");
+        plus.className = "plus";
+        plus.textContent = "+";
+        input.addEventListener("input", () => {
+          setColor(input.value);
+          refresh();
+          refreshStage();
+        });
+        wrap.appendChild(input);
+        wrap.appendChild(plus);
+        box.appendChild(wrap);
+        const origRefresh = refresh;
+        refresh = function () {
+          origRefresh();
+          const cur = getColor();
+          const isCustom = cur !== null && !PRESET_COLORS.some(c => c.hex === cur);
+          input.classList.toggle("custom-active", isCustom);
+          if (isCustom) input.value = cur;
+        };
+        refresh();
+        return refresh;
+      }
+      const refreshHairSwatches = buildSwatches("hairSwatches", "hairColorNow",
+        () => state.hairColor, v => { state.hairColor = v; });
+      const refreshEyeSwatches = buildSwatches("eyeSwatches", "eyeColorNow",
+        () => state.eyeColor, v => { state.eyeColor = v; });
+
+      /* ---------- 上方按鈕 ---------- */
+      document.getElementById("btnRandom").addEventListener("click", () => {
+        const pick = cat => {
+          const names = Object.keys(DATA[cat]);
+          state.outfit[cat] = names[Math.floor(Math.random() * names.length)];
+          syncPartUI(cat);
+        };
+        /* 必備部位：頭髮、表情、外套（上衣）、下裝一定各抽一套，不會留空；其餘部位也照樣各抽一套 */
+        ["Hair", "Face", "Coat", "Bottoms"].forEach(pick);
+        PARTS.forEach(({ cat }) => {
+          if (cat !== "Hair" && cat !== "Face" && cat !== "Coat" && cat !== "Bottoms") pick(cat);
+        });
+        /* 配色一起隨機：頭髮顏色、眼睛顏色各從「原色 + 預設色票」裡抽一個 */
+        const pickColor = () => {
+          const pool = [null].concat(PRESET_COLORS.map(c => c.hex));
+          return pool[Math.floor(Math.random() * pool.length)];
+        };
+        state.hairColor = pickColor();
+        state.eyeColor = pickColor();
+        refreshHairSwatches();
+        refreshEyeSwatches();
+        refreshStage();
+      });
+      document.getElementById("btnReset").addEventListener("click", () => {
+        state.outfit = Object.assign({}, DEFAULTS);
+        state.hairColor = null;
+        state.eyeColor = null;
+        PARTS.forEach(({ cat }) => syncPartUI(cat));
+        refreshHairSwatches();
+        refreshEyeSwatches();
+        refreshStage();
+      });
+      document.getElementById("btnDownload").addEventListener("click", async () => {
+        /* 下載用的是 canvas 合成圖；還沒畫好目前搭配就先觸發合成並等它完成。
+           圖層這時多半已經由舞台 <img> 載進瀏覽器快取，通常一下就好。 */
+        if (paintedKey !== currentKey()) {
+          render();
+          for (let i = 0; i < 50 && paintedKey !== currentKey(); i++) {
+            await new Promise(r => setTimeout(r, 300));
+          }
+        }
+        canvas.toBlob(blob => {
+          if (!blob) return;
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "紙娃娃.png";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        }, "image/png");
+      });
+
+      /* ---------- 舞台背景 ---------- */
+      const stageFrame = document.getElementById("stageFrame");
+      document.querySelectorAll(".seg button[data-bg]").forEach(b => {
+        b.addEventListener("click", () => {
+          stageFrame.classList.remove("bg-checker", "bg-dark", "bg-light");
+          stageFrame.classList.add(b.dataset.bg);
+          document.querySelectorAll(".seg button[data-bg]").forEach(x =>
+            x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+        });
+      });
+
+      PARTS.forEach(({ cat }) => syncPartUI(cat));
+      refreshStage();
+      probeAssetBase();
+    </script>
+  </body>
+</html>
